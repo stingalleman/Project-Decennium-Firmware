@@ -7,5 +7,6 @@ String pwgen(void);
 void setup_wifi_portal(void);
 void wait_wifi(void);
 String read(const char *);
+void all(RgbColor);
 
 #endif

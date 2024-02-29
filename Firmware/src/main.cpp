@@ -24,12 +24,12 @@ String my_hostname = "decennium-";
 
 // NeoPixelBus settings
 const uint16_t PixelCount = 15;
-#define colorSaturation 32
+#define colorSaturation 8
 NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Sk6812Method> strip(PixelCount, (uint8_t)4);
 RgbColor RgbRed(colorSaturation, 0, 0);
 RgbColor RgbGreen(0, colorSaturation, 0);
 RgbColor RgbBlue(0, 0, colorSaturation);
-RgbColor RgbYellow(colorSaturation, colorSaturation, 0);
+RgbColor RgbYellow(colorSaturation, (colorSaturation * 3) / 5, 0);
 RgbColor RgbBlack(0);
 
 AsyncMqttClient mqttClient;
@@ -44,8 +44,6 @@ void connectToWifi() {
     String pw = read("/wifi-password");
 
     Serial.printf("Connecting to Wi-Fi SSID %s...\n", ssid.c_str());
-    WiFi.disconnect(true);
-    WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
     WiFi.hostname(my_hostname);
     WiFi.begin(ssid.c_str(), pw.c_str());
@@ -72,6 +70,8 @@ void onMqttConnect(bool sessionPresent) {
     Serial.println("Connected to MQTT.");
     Serial.print("Session present: ");
     Serial.println(sessionPresent);
+
+    all(RgbBlack);
 
     uint16_t packetIdSub = mqttClient.subscribe("hoera10jaar/+", 0);
     Serial.print("Subscribing at QoS 0, packetId: ");
@@ -380,6 +380,8 @@ void setup_wifi_portal() {
 
     http.begin();
 
+    unsigned long usernotseentimer = millis();
+
     for (;;) {
         unsigned long m = millis();
         if (m % 1000 < 20) {
@@ -393,6 +395,14 @@ void setup_wifi_portal() {
         http.handleClient();
         dns.processNextRequest();
         ArduinoOTA.handle();
+
+        if (WiFi.softAPgetStationNum() > 0) {
+            usernotseentimer = millis();
+        } else if (millis() - usernotseentimer > 30000) {
+            all(RgbBlack);
+            Serial.println("User not seen in a while. Rebooting....");
+            ESP.restart();
+        }
     }
 }
 
@@ -464,5 +474,4 @@ void setup() {
     Serial.println(my_hostname);
 
     setup_wifi();
-    all(RgbBlack);
 }
