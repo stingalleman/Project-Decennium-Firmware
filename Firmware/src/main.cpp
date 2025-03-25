@@ -20,11 +20,15 @@ DoubleResetDetector *drd;
 #define Sprintf(f, ...) ({ char* s; asprintf(&s, f, __VA_ARGS__); String r = s; free(s); r; })
 
 const char *mqtt_server = "hoera10jaar.revspace.nl";
+const char *mqtt_server_HA = "XX"
+
+    bool disabled = false;
+
 String my_hostname = "decennium-";
 
 // NeoPixelBus settings
 const uint16_t PixelCount = 15;
-#define colorSaturation 8
+uint8 colorSaturation = 8;
 NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Sk6812Method> strip(PixelCount, (uint8_t)4);
 RgbColor RgbRed(colorSaturation, 0, 0);
 RgbColor RgbGreen(0, colorSaturation, 0);
@@ -33,6 +37,7 @@ RgbColor RgbYellow(colorSaturation, (colorSaturation * 3) / 5, 0);
 RgbColor RgbBlack(0);
 
 AsyncMqttClient mqttClient;
+AsyncMqttClient mqttClientHA;
 Ticker mqttReconnectTimer;
 
 WiFiEventHandler wifiConnectHandler;
@@ -52,6 +57,7 @@ void connectToWifi() {
 
 void connectToMqtt() {
     Serial.println("Connecting to MQTT...");
+    mqttClientHA.connect();
     mqttClient.connect();
 }
 
@@ -78,6 +84,17 @@ void onMqttConnect(bool sessionPresent) {
     Serial.println(packetIdSub);
 }
 
+void onMqttHAConnect(bool sessionPresent) {
+    Serial.println("Connected to HA MQTT.");
+    Serial.print("Session present: ");
+    Serial.println(sessionPresent);
+
+    uint16_t packetIdSub = mqttClientHA.subscribe("hoera10jaar/+", 0);
+    mqttClientHA.publish("hoera10jaar/available", 0, true, "online", 6, false, false);
+    Serial.print("Subscribing at QoS 0, packetId: ");
+    Serial.println(packetIdSub);
+}
+
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
     Serial.println("Disconnected from MQTT.");
 
@@ -100,7 +117,52 @@ void onMqttUnsubscribe(uint16_t packetId) {
     Serial.println(packetId);
 }
 
+void onMqttHAMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+    String t = topic;
+    String p = payload;
+    p = p.substring(0, len);
+
+    if (t == "hoera10jaar/set") {
+        mqttClient.unsubscribe("hoera10jaar/set");
+
+        if (p == "red") {
+            all(RgbRed);
+        } else if (p == "green") {
+            all(RgbGreen);
+        } else if (p == "yellow") {
+            all(RgbYellow);
+        } else if (p == "OFF") {
+            if (!disabled) {
+                disabled = true;
+                Serial.println("disabled: " + disabled);
+                all(RgbBlack);
+                mqttClientHA.publish("hoera10jaar", 0, true, "OFF", 3, false, false);
+            }
+        } else if (p == "ON") {
+            // check if already disabled
+            if (disabled) {
+                disabled = false;
+                Serial.println("disabled: " + disabled);
+
+                all(RgbBlack);
+                mqttClient.subscribe("hoera10jaar/+", 0);
+                mqttClientHA.publish("hoera10jaar", 0, true, "ON", 2, false, false);
+            }
+        }
+        // } else if (t == "hoera10jaar/brightness/set") {
+        //     int brightness = p.toInt();
+        //     strip.(brightness);
+        //     strip.Show();
+    }
+}
+
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+    Serial.println("disabled: " + disabled);
+
+    if (disabled) {
+        return;
+    };
+
     String t = topic;
     t.replace("hoera10jaar/", "");
 
@@ -424,6 +486,16 @@ void setup_wifi() {
     mqttClient.onPublish(onMqttPublish);
     mqttClient.setClientId(my_hostname.c_str());
     mqttClient.setServer(mqtt_server, 1883);
+
+    mqttClientHA.onConnect(onMqttHAConnect);
+    mqttClientHA.onDisconnect(onMqttDisconnect);
+    mqttClientHA.onSubscribe(onMqttSubscribe);
+    mqttClientHA.onUnsubscribe(onMqttUnsubscribe);
+    mqttClientHA.onMessage(onMqttHAMessage);
+    mqttClientHA.onPublish(onMqttPublish);
+    mqttClientHA.setClientId(my_hostname.c_str());
+    mqttClientHA.setCredentials("mqtt", "XX");
+    mqttClientHA.setServer(mqtt_server_HA, 1883);
 
     setup_ota();
     connectToWifi();
